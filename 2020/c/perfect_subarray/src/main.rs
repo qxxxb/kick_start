@@ -1,4 +1,6 @@
+use std::cmp;
 use std::io;
+use std::ops::{Index, IndexMut};
 use std::str;
 
 /// Reads white-space separated tokens one at a time.
@@ -32,72 +34,132 @@ impl<R: io::BufRead> Scanner<R> {
     }
 }
 
-const LOG_TABLE_U32: [u32; 32] = [
-    0, 9, 1, 10, 13, 21, 2, 29, 11, 14, 16, 18, 22, 25, 3, 30, 8, 12, 20, 28, 15, 17, 24, 7, 19,
-    27, 23, 6, 26, 5, 4, 31,
-];
-
-fn log2_u32(x: u32) -> u32 {
-    // Based on http://guihaire.com/code/?p=414
-    let mut value = x;
-    value |= value >> 1;
-    value |= value >> 2;
-    value |= value >> 4;
-    value |= value >> 8;
-    value |= value >> 16;
-    return LOG_TABLE_U32[(value.wrapping_mul(0x07C4ACDD) >> 27) as usize];
+struct PartialSums {
+    data: Vec<i32>,
+    offset: usize,
 }
 
-fn guess_square_root(x: i32) -> i32 {
-    // Based on https://en.wikipedia.org/wiki/Methods_of_computing_square_roots.
-    // We shift off the floor of half the bits.
-    let x = x as u32;
-    let n = log2_u32(x);
-    return 1 << (n / 2);
-}
-
-fn sqrt_i32(a: i32) -> Option<i32> {
-    if a == 0 { return Some(0); }
-    match a % 10 {
-        2 | 3 | 7 | 8 => return None,
-        _ => {}
-    }
-
-    // Newton's method where f(x) = x * x - a.
-    // Based on https://math.stackexchange.com/a/41355.
-    // Also see https://en.wikipedia.org/wiki/Integer_square_root.
-    let mut x_n = guess_square_root(a);
-    loop {
-        let x_n_1: i32 = (x_n * x_n + a) / (2 * x_n);
-        let guess = x_n_1 * x_n_1;
-
-        if guess == a {
-            return Some(x_n_1);
-        } else if (x_n_1 - x_n).abs() <= 1 {
-            return None;
+impl PartialSums {
+    fn get_min_max_partial_sum(xs: &Vec<i32>) -> (i32, i32) {
+        let mut min = xs[0];
+        let mut max = xs[0];
+        let mut partial_sum = 0;
+        for x in xs {
+            partial_sum += x;
+            min = cmp::min(partial_sum, min);
+            max = cmp::max(partial_sum, max);
         }
 
-        x_n = x_n_1;
+        (min, max)
+    }
+
+    pub fn new(xs: &Vec<i32>) -> Self {
+        let (min, max) = Self::get_min_max_partial_sum(&xs);
+        let offset = -cmp::min(min, 0) as usize;
+
+        let initial_size = ((max + (offset as i32)) + 1) as usize;
+
+        Self {
+            data: vec![0; initial_size],
+            offset,
+        }
+    }
+
+    pub fn real_index(&self, index: i32) -> usize {
+        (index + (self.offset as i32)) as usize
     }
 }
 
-fn sqrt_binary_search_i64(a: i64) -> Option<i64> {
-    let mut bottom = 0;
-    let mut top = a + 1;
-    loop {
-        let guess = (top + bottom) / 2;
-        let guess_squared = guess * guess;
-        if guess_squared == a {
-            return Some(guess);
-        } else {
-            if top - bottom <= 1 {
-                return None;
-            } else if guess_squared < a {
-                bottom = guess;
-            } else if guess_squared > a {
-                top = guess;
-            }
+impl Index<i32> for PartialSums {
+    type Output = i32;
+    fn index(&self, index: i32) -> &Self::Output {
+        &self.data[self.real_index(index)]
+    }
+}
+
+impl IndexMut<i32> for PartialSums {
+    fn index_mut(&mut self, index: i32) -> &mut Self::Output {
+        let real_index = self.real_index(index);
+        if real_index >= self.data.len() {
+            &mut self.data.resize(real_index + 1, 0);
         }
+        &mut self.data[real_index]
+    }
+}
+
+fn generate_squares(max_square: i32) -> Vec<i32> {
+    // Based on `generate_squares_bench`, we can determine the capacity
+    let capacity = (max_square as f32).sqrt().ceil() as usize + 1;
+    let mut result: Vec<i32> = Vec::with_capacity(capacity);
+    println!("capacity: {}", capacity);
+
+    for i in 0..(capacity as i32) {
+        let square = i * i;
+        result.push(square);
+    }
+
+    result
+}
+
+fn count_squares(partial_sum: i32, squares: &Vec<i32>, partial_sums: &PartialSums) -> i32 {
+    let mut result = 0;
+    for square in squares {
+        let index = partial_sum - square;
+
+        if index == 0 {
+            result += 1;
+        }
+
+        if index + (partial_sums.offset as i32) < 0 {
+            break;
+        }
+
+        let n_occurrences = partial_sums[index];
+        result += n_occurrences;
+    }
+
+    result
+}
+
+fn count_squares_in_subarrays(xs: &Vec<i32>, squares: &Vec<i32>) -> i32 {
+    let mut partial_sums = PartialSums::new(&xs);
+
+    let mut result = 0;
+
+    let mut partial_sum = 0;
+    for x in xs {
+        // Count number of subarrays that end at `i` and have a sum that is
+        // a perfect square
+
+        partial_sum += x;
+
+        result += count_squares(partial_sum, &squares, &partial_sums);
+
+        partial_sums[partial_sum] += 1;
+    }
+
+    result
+}
+
+fn main() {
+    let squares = generate_squares(1_000_000 * 100);
+
+    let stdin = io::stdin();
+    let mut scanner = Scanner::new(stdin.lock());
+    let t: i32 = scanner.token();
+
+    for ti in 0..t {
+        let n: i32 = scanner.token();
+
+        let mut xs = Vec::with_capacity(n as usize);
+
+        for _ in 0..n {
+            let x: i32 = scanner.token();
+            xs.push(x);
+        }
+
+        let result = count_squares_in_subarrays(&xs, &squares);
+        println!("Case #{}: {}", ti + 1, result);
     }
 }
 
@@ -107,163 +169,195 @@ mod tests {
     use std::time::Instant;
 
     #[test]
-    fn log2_u32_low() {
-        assert_eq!(log2_u32(1), 0);
-        assert_eq!(log2_u32(2), 1);
-        assert_eq!(log2_u32(3), 1);
-        assert_eq!(log2_u32(4), 2);
-        assert_eq!(log2_u32(5), 2);
-        assert_eq!(log2_u32(6), 2);
-        assert_eq!(log2_u32(7), 2);
-        assert_eq!(log2_u32(8), 3);
-        assert_eq!(log2_u32(9), 3);
-        assert_eq!(log2_u32(15), 3);
-        assert_eq!(log2_u32(16), 4);
-        assert_eq!(log2_u32(31), 4);
-        assert_eq!(log2_u32(32), 5);
-    }
-
-    #[test]
-    fn guess_square_root_low() {
-        assert_eq!(guess_square_root(1), 1);
-        assert_eq!(guess_square_root(2), 1);
-        assert_eq!(guess_square_root(3), 1);
-        assert_eq!(guess_square_root(4), 2);
-        assert_eq!(guess_square_root(5), 2);
-        assert_eq!(guess_square_root(6), 2);
-        assert_eq!(guess_square_root(7), 2);
-        assert_eq!(guess_square_root(8), 2);
-        assert_eq!(guess_square_root(9), 2);
-        assert_eq!(guess_square_root(15), 2);
-        assert_eq!(guess_square_root(16), 4);
-        assert_eq!(guess_square_root(31), 4);
-        assert_eq!(guess_square_root(32), 4);
-        assert_eq!(guess_square_root(63), 4);
-        assert_eq!(guess_square_root(64), 8);
-    }
-
-    #[test]
-    fn sqrt_i32_low() {
-        for x in 0..512 {
-            let result = sqrt_i32(x);
-            match result {
-                Some(sqrt) => assert_eq!(sqrt * sqrt, x),
-                None => assert_ne!((x as f32).sqrt().fract(), 0.0_f32),
-            }
-        }
-    }
-
-    #[test]
-    fn sqrt_i32_mid() {
-        for x in 512..1024 {
-            let result = sqrt_i32(x);
-            match result {
-                Some(sqrt) => assert_eq!(sqrt * sqrt, x),
-                None => assert_ne!((x as f32).sqrt().fract(), 0.0_f32),
-            }
-        }
-    }
-
-    #[test]
-    fn sqrt_i32_high_true() {
-        assert_eq!(sqrt_i32(30858025), Some(5555));
-        assert_eq!(sqrt_i32(44435556), Some(6666));
-        assert_eq!(sqrt_i32(100000000), Some(10000));
-        // assert_eq!(sqrt_i32(987656329), Some(31427));
-        // assert_eq!(sqrt_i32(152399025), Some(12345));
-    }
-
-    #[test]
-    fn sqrt_i32_high_false() {
-        assert_eq!(sqrt_i32(30858026), None);
-        assert_eq!(sqrt_i32(30823412), None);
-        assert_eq!(sqrt_i32(59109310), None);
-        // assert_eq!(sqrt_i32(123456789), None);
-        // assert_eq!(sqrt_i32(987654321), None);
-    }
-
-    #[test] #[ignore]
-    fn sqrt_i32_benchmark() {
-        // This should be run in release mode, otherwise it takes around 12
-        // seconds
-        let instant = Instant::now();
-        for x in 0..100000000 {
-            sqrt_i32(x);
-        }
-
-        println!(
-            "Time elapsed: {}",
-            instant.elapsed().as_micros() as f64 / 1e6
+    fn get_min_max_partial_sum_1() {
+        let xs = vec![1, 2, 3, 4, 5];
+        assert_eq!(
+            PartialSums::get_min_max_partial_sum(&xs),
+            (1, 1 + 2 + 3 + 4 + 5)
         );
     }
 
     #[test]
-    fn sqrt_binary_search_i64_low() {
-        for x in 0..512 {
-            let result = sqrt_binary_search_i64(x);
-            match result {
-                Some(sqrt) => assert_eq!(sqrt * sqrt, x),
-                None => assert_ne!((x as f32).sqrt().fract(), 0.0_f32),
-            }
-        }
+    fn get_min_max_partial_sum_2() {
+        let xs = vec![1, 2, 3, -4, -5, -6];
+        assert_eq!(PartialSums::get_min_max_partial_sum(&xs), (-9, 1 + 2 + 3));
     }
 
-    #[test] #[ignore]
-    fn sqrt_binary_search_i64_benchmark() {
-        // Currently the loop gets completely optimized out, which is not good
-        // for benchmarking.
-        // TODO: Use test::bench
-        let instant = Instant::now();
-        for x in 0..65536 {
-            sqrt_binary_search_i64(x);
-        }
+    #[test]
+    fn get_min_max_partial_sum_3() {
+        let xs = vec![-1, -2, -3];
+        assert_eq!(PartialSums::get_min_max_partial_sum(&xs), (-6, -1));
+    }
 
+    #[test]
+    #[ignore]
+    fn generate_squares_bench() {
+        let instant = Instant::now();
+        let squares = generate_squares(1_000_000 * 100);
         println!(
             "Time elapsed: {}",
             instant.elapsed().as_micros() as f64 / 1e6
         );
+        println!("squares.len(): {}", squares.len());
+        assert_eq!(squares[0], 0);
+        assert_eq!(squares[1], 1);
+        assert_eq!(squares[2], 4);
+        assert_eq!(squares[3], 9);
+        assert_eq!(squares[squares.len() - 1], 10_000 * 10_000);
+        assert_eq!(squares[squares.len() - 2], 9999 * 9999);
+        assert_eq!(squares[squares.len() - 3], 9998 * 9998);
     }
-}
 
-fn main() {
-    let stdin = io::stdin();
-    let mut scanner = Scanner::new(stdin.lock());
-    let t: i32 = scanner.token();
-    for ti in 0..t {
-        let n: i32 = scanner.token();
+    #[test]
+    fn main_single() {
+        let squares = generate_squares(100);
+        let xs = vec![-9];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 0);
+        let xs = vec![-4];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 0);
+        let xs = vec![-3];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 0);
+        let xs = vec![-2];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 0);
+        let xs = vec![-1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 0);
+        let xs = vec![0];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1);
+        let xs = vec![1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1);
+        let xs = vec![2];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 0);
+        let xs = vec![3];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 0);
+        let xs = vec![4];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1);
+        let xs = vec![5];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 0);
+        let xs = vec![9];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1);
+    }
 
-        let mut n_perfect = 0;
-        let mut arr: Vec<i64> = Vec::with_capacity(n as usize);
+    #[test]
+    fn main_positive_easy() {
+        let squares = generate_squares(100);
+        let xs = vec![2, 2, 6];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1);
+        let xs = vec![30, 30, 9, 1, 30];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 3);
+        let xs = vec![4, 0, 0, 16];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 9);
+        let xs = vec![2, 3, 1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 2);
+        let xs = vec![4, 4];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 2);
+    }
 
-        for _ in 0..n {
-            let x: i64 = scanner.token();
+    #[test]
+    fn main_repeated_zeroes() {
+        let squares = generate_squares(100);
+        let xs = vec![0, 0];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 3);
+        let xs = vec![0, 0, 0];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 6);
+        let xs = vec![0, 0, 0, 0];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 10);
+        let xs = vec![0, 0, 0, 0, 0];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 15);
+    }
 
-            // Check them now while we have them
-            if let Some(_) = sqrt_binary_search_i64(x) {
-                n_perfect += 1;
-            }
+    #[test]
+    fn main_repeated_ones() {
+        let squares = generate_squares(100);
+        let xs = vec![1, 1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 2);
+        let xs = vec![1, 1, 1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 3);
+        let xs = vec![1, 1, 1, 1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 5);
+        let xs = vec![1, 1, 1, 1, 1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 7);
+        let xs = vec![1, 1, 1, 1, 1, 1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 6 + 3);
+    }
 
-            arr.push(x);
-        }
+    #[test]
+    fn main_small_sum_zero() {
+        let squares = generate_squares(100);
 
-        let mut prev_sub_sums = arr.clone();
+        let xs = vec![1, -1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 2);
+        let xs = vec![2, -2];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1);
+        let xs = vec![3, -3];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1);
 
-        for sub_size in 2..(n + 1) {
-            let n_subs = n - sub_size + 1;
-            let mut sub_sums: Vec<i64> = Vec::with_capacity(n_subs as usize);
+        let xs = vec![-1, 1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 2);
+        let xs = vec![-2, 2];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1);
+        let xs = vec![-3, 3];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1);
 
-            for i in 0..n_subs {
-                let sub_sum = prev_sub_sums[i as usize] + arr[(i + sub_size - 1) as usize];
-                if let Some(_) = sqrt_binary_search_i64(sub_sum) {
-                    n_perfect += 1;
-                }
+        let xs = vec![1, 0, -1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1 + 2 + 1);
+        let xs = vec![2, 0, -2];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1 + 1);
+        let xs = vec![3, 0, -3];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1 + 1);
 
-                sub_sums.push(sub_sum);
-            }
+        let xs = vec![-1, 0, 1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1 + 2 + 1);
+        let xs = vec![-2, 0, 2];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1 + 1);
+        let xs = vec![-3, 0, 3];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1 + 1);
 
-            prev_sub_sums = sub_sums;
-        }
+        let xs = vec![-2, 1, 1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 3);
+        let xs = vec![-2, 0, 1, 1];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1 + 2 + 1 + 1);
+        let xs = vec![5, -2, -3];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1);
+    }
 
-        println!("Case #{}: {}", ti + 1, n_perfect);
+    #[test]
+    fn main_small_negatives() {
+        let squares = generate_squares(100);
+        let xs = vec![-1, -2];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 0);
+        let xs = vec![-1, -2, -3];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 0);
+        let xs = vec![-1, -2, -3, -4];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 0);
+        let xs = vec![-1, -2, -3, -4, -5];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 0);
+    }
+
+    #[test]
+    fn main_mixed() {
+        let squares = generate_squares(100);
+        let xs = vec![-2, 0];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1);
+        let xs = vec![-2, 0, 0];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 3);
+        let xs = vec![-2, 0, 0, 2];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 4);
+        let xs = vec![-2, 1, 1, 4];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 3 + 2);
+        let xs = vec![-2, 0, 1, 1, 4];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1 + 2 + 1 + 1 + 2);
+
+        let xs = vec![2, 0];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1);
+        let xs = vec![0, 2];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 1);
+        let xs = vec![0, 0, 2];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 3);
+        let xs = vec![4, 0];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 3);
+        let xs = vec![0, 4];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 3);
+        let xs = vec![0, 0, 4];
+        assert_eq!(count_squares_in_subarrays(&xs, &squares), 3 + 2 + 1);
     }
 }
