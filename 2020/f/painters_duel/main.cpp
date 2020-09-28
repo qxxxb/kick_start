@@ -6,8 +6,6 @@
 #include <ctgmath>
 using namespace std;
 
-#define DEBUG 1
-
 #ifdef DEBUG
 #include <cassert>
 #endif
@@ -258,80 +256,63 @@ void testState()
 }
 #endif
 
-struct EvalNode {
-    bool max;
-    vector<EvalNode> children;
-};
-
-int findBestScore(State& initial_state) {
+int findBestScore(State& state) {
     // TODO: Find the best score that Alma can guarantee
 
-    EvalNode eval_tree;
+    bool best_score_set = false;
+    int best_score = 0;
 
-    queue<State> q;
-    q.push(initial_state);
-    while (q.size() > 0) {
-        auto state = q.front();
-        q.pop();
-
-        // TODO: Save score in eval tree
-
-        if (state.gameFinished()) {
-            // Game finished
+    if (state.gameFinished()) {
+        // Game finished
 #ifdef DEBUG
-            state.printRooms();
-            cout << "Temp: " << state.score << endl;
+        state.printRooms();
+        cout << "Temp: " << state.score << endl;
 #endif
-            // TODO: Do anything here?
-        } else {
-            auto succs = state.expand_succs();
+        best_score = state.score;
+        best_score_set = true;
+    } else {
+        auto succs = state.expand_succs();
 
-            Turn just_moved = state.turn;
+        Turn just_moved = state.turn;
+        Turn next_player = just_moved == T_ALMA ? T_BERTHE : T_ALMA;
 
-            bool force_blocked = false;
-            if (succs.size() == 1) {
-                auto succ = succs[0];
-                force_blocked = !succ.canMove(just_moved);
+        bool force_blocked = true;
+        for (auto succ : succs) {
+            bool blocked = !succ.canMove(just_moved);
+            if (!blocked) {
+                force_blocked = false;
+                break;
+            }
+        }
+
+        for (auto succ : succs) {
+            bool just_blocked_self = !succ.canMove(just_moved) && state.canMove(just_moved);
+            bool just_blocked_other = !succ.canMove(next_player) && state.canMove(next_player);
+            if (just_blocked_self && !(force_blocked || just_blocked_other)) {
+                // Why would you block yourself?
+                // - Only if you have no other options (`force_blocked`)
+                // - To block the other person
+                continue;
             }
 
-            for (auto succ : succs) {
-                bool alma_blocked = !succ.canMove(T_ALMA);
-                bool berthe_blocked = !succ.canMove(T_BERTHE);
-                if (alma_blocked && !berthe_blocked) {
-                    if (just_moved == T_ALMA) {
-                        // Why would Alma block herself?
-                        // - Only if she had no other choice.
-                        // - To block Berthe
-                        if (force_blocked) {
-                            q.push(succ);
-                        }
-                    } else {
-                        // Alma blocked by Berthe. Good move by Berthe.
-                        q.push(succ);
-                    }
-                } else if (berthe_blocked && !alma_blocked) {
-                    if (just_moved == T_ALMA) {
-                        // Berthe blocked by Alma. Good move by Alma.
-                        q.push(succ);
-                    } else {
-                        // Why would Berthe block herself?
-                        // - Only if she had no other choice.
-                        // - To block Alma
-                        if (force_blocked) {
-                            q.push(succ);
-                        }
-                    }
-                } else if (alma_blocked && berthe_blocked) {
-                    // We know the game is already finished. However, we will still
-                    // enqueue so that we can handle it when we dequeue.
-                    q.push(succ);
-                } else {
-                    // Both unblocked
-                    q.push(succ);
+            int score = findBestScore(succ);
+            if (best_score_set) {
+                if (just_moved == T_ALMA) {
+                    best_score = max(best_score, score);
+                } else if (just_moved == T_BERTHE) {
+                    best_score = min(best_score, score);
                 }
+            } else {
+                best_score = score;
+                best_score_set = true;
             }
         }
     }
+
+#ifdef DEBUG
+    assert(best_score_set);
+#endif
+    return best_score;
 }
 
 int main(int argc, char *argv[])
