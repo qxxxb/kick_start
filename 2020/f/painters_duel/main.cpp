@@ -33,6 +33,11 @@ struct State {
     int berthe_index;
     int score;
     Turn turn;
+
+    // Optimization:
+    // - We only care if the room has been painted or not
+    // - Since the maximum number of rooms is 36, we can use a 64-bit integer as a
+    //   bit vector
     vector<Color> room_colors;
 
     State(Pos a_pos, Pos b_pos) {
