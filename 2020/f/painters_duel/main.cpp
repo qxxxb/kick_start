@@ -298,8 +298,14 @@ int findBestScore(State& state) {
             int score = findBestScore(succ);
             if (best_score_set) {
                 if (just_moved == T_ALMA) {
+                    // If Alma just moved, we want to best score possible among
+                    // the successor states because we assume Alma is playing
+                    // at her best.
                     best_score = max(best_score, score);
                 } else if (just_moved == T_BERTHE) {
+                    // If Berthe just moved, we take the worst score possible
+                    // among the successor states because we assume Berthe is
+                    // playing at her best.
                     best_score = min(best_score, score);
                 }
             } else {
