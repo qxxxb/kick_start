@@ -1,20 +1,15 @@
 #include <iostream>
 #include <vector>
-#include <list>
 #include <stack>
 #include <queue>
 #include <unordered_set>
 #include <ctgmath>
 using namespace std;
 
-#define DEBUG 1
-
-#ifdef DEBUG
 #include <cassert>
-#endif
 
-enum Color { NONE, ALMA, BERTHA, CONS };
-enum Turn { T_ALMA, T_BERTHA };
+enum Color { NONE, ALMA, BERTHE, CONS };
+enum Turn { T_ALMA, T_berthe };
 
 int g_building_sides = 0;
 
@@ -33,19 +28,20 @@ struct Pos {
 
 struct State {
     int alma_index;
-    int bertha_index;
+    int berthe_index;
     int score;
     Turn turn;
     vector<Color> room_colors;
 
     State(Pos a_pos, Pos b_pos) {
         alma_index = toIndex(a_pos);
-        bertha_index = toIndex(b_pos);
+        berthe_index = toIndex(b_pos);
         score = 0;
         turn = T_ALMA;
+
         room_colors = vector<Color>(g_building_sides * g_building_sides, NONE);
         room_colors[alma_index] = ALMA;
-        room_colors[bertha_index] = BERTHA;
+        room_colors[berthe_index] = BERTHE;
     }
 
     Pos toPos(int i) {
@@ -124,10 +120,10 @@ struct State {
             room_colors[i] = ALMA;
             alma_index = i;
             score++;
-            turn = T_BERTHA;
+            turn = T_berthe;
         } else {
-            room_colors[i] = BERTHA;
-            bertha_index = i;
+            room_colors[i] = BERTHE;
+            berthe_index = i;
             score--;
             turn = T_ALMA;
         }
@@ -138,7 +134,7 @@ struct State {
         if (turn == T_ALMA) {
             start = alma_index;
         } else {
-            start = bertha_index;
+            start = berthe_index;
         }
 
         auto neighbors = paintable_neighbors(start);
@@ -153,7 +149,7 @@ struct State {
             // Player cannot move
             auto succ = *this;
             if (turn == T_ALMA) {
-                succ.turn = T_BERTHA;
+                succ.turn = T_berthe;
             } else {
                 succ.turn = T_ALMA;
             }
@@ -163,28 +159,63 @@ struct State {
         return result;
     }
 
-    bool canMove(Turn player) {
+    int nMoves(Turn player) {
         int start;
         if (player == T_ALMA) {
             start = alma_index;
         } else {
-            start = T_BERTHA;
+            start = berthe_index;
         }
-        return paintable_neighbors(start).size() > 0;
+        return paintable_neighbors(start).size();
+    }
+
+    bool canMove(Turn player) {
+        return nMoves(player) > 0;
     }
 
     bool gameFinished() {
-        return !canMove(T_ALMA) && !canMove(T_BERTHA);
+        return !canMove(T_ALMA) && !canMove(T_berthe);
+    }
+
+    char toChar(Color color) {
+        switch (color) {
+            case NONE:
+                return 'N';
+            case ALMA:
+                return 'A';
+            case BERTHE:
+                return 'B';
+            case CONS:
+                return 'C';
+            default:
+                return 'X';
+        }
+    }
+
+    void printRooms() {
+        int row = 1;
+        int col = 1;
+        int n_in_row = 1;
+        for (size_t i = 0; i < room_colors.size(); ++i) {
+            cout << toChar(room_colors[i]) << " ";
+
+            col++;
+            if (col > n_in_row) {
+                row++;
+                n_in_row += 2;
+                col = 1;
+                cout << endl;
+            }
+        }
     }
 };
 
-#ifdef DEBUG
 void testState()
 {
     g_building_sides = 4;
     auto alma_pos = Pos(2, 2);
-    auto bertha_pos = Pos(4, 2);
-    auto state = State(alma_pos, bertha_pos);
+    auto berthe_pos = Pos(4, 2);
+    auto state = State(alma_pos, berthe_pos);
     state.room_colors[0] = CONS;
     state.room_colors[14] = CONS;
     state.turn = T_ALMA;
@@ -197,7 +228,7 @@ void testState()
             cout << "(" << p.row << ", " << p.col << "): " << c << endl;
         }
         cout << "Alma room index: " << succ.alma_index << endl;;
-        assert(succ.turn == T_BERTHA);
+        assert(succ.turn == T_berthe);
         assert(succ.score == 1);
     }
 
@@ -220,9 +251,13 @@ void testState()
         }
     }
 }
-#endif
 
-void searchStates(State& initial_state) {
+int findMinScore(State& initial_state) {
+    // TODO: Find the best score that Alma can guarantee
+
+    bool min_score_set = false;
+    int min_score = 0;
+
     stack<State> q;
     q.push(initial_state);
     while (q.size() > 0) {
@@ -230,8 +265,14 @@ void searchStates(State& initial_state) {
         q.pop();
 
         if (state.gameFinished()) {
-            cout << state.score << endl;
-            // TODO: record max
+            cout << "temp: " << state.score << endl;
+            state.printRooms();
+            if (!min_score_set) {
+                min_score = state.score;
+                min_score_set = true;
+            } else {
+                min_score = min(min_score, state.score);
+            }
         } else {
             auto succs = state.expand_succs();
             for (auto succ : succs) {
@@ -240,6 +281,9 @@ void searchStates(State& initial_state) {
             }
         }
     }
+
+    assert(min_score_set);
+    return min_score;
 }
 
 int main(int argc, char *argv[])
@@ -250,14 +294,14 @@ int main(int argc, char *argv[])
     int t;
     cin >> t;
     for (int ti = 0; ti < t; ++ti) {
-        Pos alma_pos, bertha_pos;
+        Pos alma_pos, berthe_pos;
         int n_cons;
         cin >> g_building_sides >>
             alma_pos.row >> alma_pos.col >>
-            bertha_pos.row >> bertha_pos.col >>
+            berthe_pos.row >> berthe_pos.col >>
             n_cons;
 
-        auto state = State(alma_pos, bertha_pos);
+        auto state = State(alma_pos, berthe_pos);
         state.turn = T_ALMA;
 
         for (int i = 0; i < n_cons; ++i) {
@@ -266,8 +310,8 @@ int main(int argc, char *argv[])
             state.room_colors[state.toIndex(cons_pos)] = CONS;
         }
 
-        searchStates(state);
-        cout << "---" << endl;
+        int result = findMinScore(state);
+        cout << "Case #" << ti + 1 << ": " << result << endl;
     }
 
     return 0;
