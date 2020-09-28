@@ -6,10 +6,14 @@
 #include <ctgmath>
 using namespace std;
 
+#define DEBUG 1
+
+#ifdef DEBUG
 #include <cassert>
+#endif
 
 enum Color { NONE, ALMA, BERTHE, CONS };
-enum Turn { T_ALMA, T_berthe };
+enum Turn { T_ALMA, T_BERTHE };
 
 int g_building_sides = 0;
 
@@ -120,7 +124,7 @@ struct State {
             room_colors[i] = ALMA;
             alma_index = i;
             score++;
-            turn = T_berthe;
+            turn = T_BERTHE;
         } else {
             room_colors[i] = BERTHE;
             berthe_index = i;
@@ -149,7 +153,7 @@ struct State {
             // Player cannot move
             auto succ = *this;
             if (turn == T_ALMA) {
-                succ.turn = T_berthe;
+                succ.turn = T_BERTHE;
             } else {
                 succ.turn = T_ALMA;
             }
@@ -174,7 +178,7 @@ struct State {
     }
 
     bool gameFinished() {
-        return !canMove(T_ALMA) && !canMove(T_berthe);
+        return !canMove(T_ALMA) && !canMove(T_BERTHE);
     }
 
     char toChar(Color color) {
@@ -210,6 +214,7 @@ struct State {
     }
 };
 
+#ifdef DEBUG
 void testState()
 {
     g_building_sides = 4;
@@ -228,7 +233,7 @@ void testState()
             cout << "(" << p.row << ", " << p.col << "): " << c << endl;
         }
         cout << "Alma room index: " << succ.alma_index << endl;;
-        assert(succ.turn == T_berthe);
+        assert(succ.turn == T_BERTHE);
         assert(succ.score == 1);
     }
 
@@ -251,39 +256,82 @@ void testState()
         }
     }
 }
+#endif
 
-int findMinScore(State& initial_state) {
+struct EvalNode {
+    bool max;
+    vector<EvalNode> children;
+};
+
+int findBestScore(State& initial_state) {
     // TODO: Find the best score that Alma can guarantee
 
-    bool min_score_set = false;
-    int min_score = 0;
+    EvalNode eval_tree;
 
-    stack<State> q;
+    queue<State> q;
     q.push(initial_state);
     while (q.size() > 0) {
-        auto state = q.top();
+        auto state = q.front();
         q.pop();
 
+        // TODO: Save score in eval tree
+
         if (state.gameFinished()) {
-            cout << "temp: " << state.score << endl;
+            // Game finished
+#ifdef DEBUG
             state.printRooms();
-            if (!min_score_set) {
-                min_score = state.score;
-                min_score_set = true;
-            } else {
-                min_score = min(min_score, state.score);
-            }
+            cout << "Temp: " << state.score << endl;
+#endif
+            // TODO: Do anything here?
         } else {
             auto succs = state.expand_succs();
+
+            Turn just_moved = state.turn;
+
+            bool force_blocked = false;
+            if (succs.size() == 1) {
+                auto succ = succs[0];
+                force_blocked = !succ.canMove(just_moved);
+            }
+
             for (auto succ : succs) {
-                // TODO: Favor succs with a higher score
-                q.push(succ);
+                bool alma_blocked = !succ.canMove(T_ALMA);
+                bool berthe_blocked = !succ.canMove(T_BERTHE);
+                if (alma_blocked && !berthe_blocked) {
+                    if (just_moved == T_ALMA) {
+                        // Why would Alma block herself?
+                        // - Only if she had no other choice.
+                        // - To block Berthe
+                        if (force_blocked) {
+                            q.push(succ);
+                        }
+                    } else {
+                        // Alma blocked by Berthe. Good move by Berthe.
+                        q.push(succ);
+                    }
+                } else if (berthe_blocked && !alma_blocked) {
+                    if (just_moved == T_ALMA) {
+                        // Berthe blocked by Alma. Good move by Alma.
+                        q.push(succ);
+                    } else {
+                        // Why would Berthe block herself?
+                        // - Only if she had no other choice.
+                        // - To block Alma
+                        if (force_blocked) {
+                            q.push(succ);
+                        }
+                    }
+                } else if (alma_blocked && berthe_blocked) {
+                    // We know the game is already finished. However, we will still
+                    // enqueue so that we can handle it when we dequeue.
+                    q.push(succ);
+                } else {
+                    // Both unblocked
+                    q.push(succ);
+                }
             }
         }
     }
-
-    assert(min_score_set);
-    return min_score;
 }
 
 int main(int argc, char *argv[])
@@ -310,7 +358,7 @@ int main(int argc, char *argv[])
             state.room_colors[state.toIndex(cons_pos)] = CONS;
         }
 
-        int result = findMinScore(state);
+        int result = findBestScore(state);
         cout << "Case #" << ti + 1 << ": " << result << endl;
     }
 
